@@ -141,27 +141,27 @@ class Solution:
         # self.tasks = [Task(i) for i in range(self.num_tasks)]
         # self.processors = [Processor(i) for i in range(self.num_processors)]
 
-        queue = [u for u in range(self.num_tasks) if indeg[u] == 0]
+        queue = collections.deque(
+            [u for u in range(self.num_tasks) if indeg[u] == 0])
 
-        result = list()
+        # result = list()
         makespan = 0.0
 
-        while len(queue):
+        while queue:
             N = len(queue)
             tasks = list()
-            taskWorkLoad = [0] * N
+            # taskWorkLoad = [0] * N
             processSpeed = [[1] * N for _ in range(processors)]
 
-            for nodes in queue:
+            for _ in range(N):
                 u = queue.pop()
-                result.append(u)
+                # result.append(u)
                 tasks.append(self.sizes[u])
                 for v in self.edges[u]:
                     indeg[v] -= 1
                     if indeg[v] == 0:
                         queue.insert(0, v)
-
-            ans = solveNLP(processSpeed, taskWorkLoad)
+            ans = solveNLP(processSpeed, tasks)
             # print(ans)
 
 
