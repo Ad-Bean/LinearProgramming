@@ -107,11 +107,16 @@ def solveNLP(processSpeed: List[List[int]], taskWorkLoad: List[int]):
     # print('-----------------------------------------------------------------')
     # print('Optimal Obj: {}'.format(model.ObjVal))
     # print('-----------------------------------------------------------------')
+    min_makespan = float("inf")
+    job_no = 0
 
     for j in range(N):
         print('T{} = {}'.format(j, T[j].x))
+        if T[j].x < min_makespan:
+            min_makespan = min(T[j].x, min_makespan)
+            job_no = j
 
-    return T
+    return [min_makespan, job_no]
 
 
 class Solution:
@@ -149,20 +154,31 @@ class Solution:
 
         while queue:
             N = len(queue)
-            tasks = list()
+            tasks = []
+            orders = []
             # taskWorkLoad = [0] * N
             processSpeed = [[1] * N for _ in range(processors)]
+            free_processors = processors - N
+
+            for u in queue:
+                tasks.append(self.sizes[u])
+                orders.append(u)
+                # for v in self.edges[u]:
+                #     indeg[v] -= 1
+                #     if indeg[v] == 0:
+                #         queue.insert(0, v)
+            min_makespan, job_no = solveNLP(processSpeed, tasks)
+            # TODO:
+            # 该层最小完成时间，任务编号
+            print(min_makespan, job_no)
 
             for _ in range(N):
-                u = queue.pop()
-                # result.append(u)
-                tasks.append(self.sizes[u])
+                u = queue.popleft()
                 for v in self.edges[u]:
                     indeg[v] -= 1
                     if indeg[v] == 0:
-                        queue.insert(0, v)
-            ans = solveNLP(processSpeed, tasks)
-            # print(ans)
+                        queue.append(v)
+        # print(ans)
 
 
 if __name__ == "__main__":
@@ -173,4 +189,4 @@ if __name__ == "__main__":
     args = ap.parse_args()
 
     new_sch = Solution(file=args.input, verbose=True,
-                       processors=4, b=0.1, ccr=0.1)
+                       processors=3, b=0.1, ccr=0.1)
