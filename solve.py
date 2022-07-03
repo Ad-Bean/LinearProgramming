@@ -125,16 +125,9 @@ class Solution:
             self.num_tasks, self.num_processors, self.sizes, self.edges = read_dag_adj(
                 file, processors, b, ccr)
 
-        if verbose:
-            print("No. of Tasks: ", self.num_tasks)
-            print("No. of processors: ", self.num_processors)
-            # print("Adjacent Graph: ", self.edges)
-            # print("Computational Cost Matrix:")
-            # for i in range(self.num_tasks):
-            #     print(comp_cost[i])
-            # print("Graph Matrix:")
-            # for line in self.graph:
-            #     print(line)
+        # if verbose:
+            # print("No. of Tasks: ", self.num_tasks)
+            # print("No. of processors: ", self.num_processors)
 
         indeg = [0] * (self.num_tasks + 2)
 
