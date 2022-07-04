@@ -86,6 +86,7 @@ def solveNLP(orders: List[int], processSpeed: List[List[int]], taskWorkLoad: Lis
     model.addConstrs((T[j] >= quicksum(x[i][j] * p[i][j] for i in range(M)) for j in range(N)),
                      "process_time_limit")
 
+    #加约束4： T_i \geq p_i + start_time_i
     for j in range(N):
         for k in range(N):
             model.addQConstr(c[j][k] == quicksum(
@@ -110,7 +111,7 @@ def solveNLP(orders: List[int], processSpeed: List[List[int]], taskWorkLoad: Lis
     # print('Optimal Obj: {}'.format(model.ObjVal))
     # print('-----------------------------------------------------------------')
     min_makespan = float("inf")
-    max_makespan = 0
+    # max_makespan = 0
     min_job_idx = 0
     jobs = collections.defaultdict(list)
     cpus = collections.defaultdict(list)
@@ -121,12 +122,12 @@ def solveNLP(orders: List[int], processSpeed: List[List[int]], taskWorkLoad: Lis
             if x[k][j].x == 1:
                 cpus[k].append(orders[j])
         jobs[orders[j]].append(T[j].x)
-        max_makespan = max(T[j].x, max_makespan)
+        # max_makespan = max(T[j].x, max_makespan)
         if T[j].x < min_makespan:
             min_makespan = min(T[j].x, min_makespan)
             min_job_idx = j
 
-    return [max_makespan, min_makespan, min_job_idx, jobs, cpus]
+    return [min_makespan, min_job_idx, jobs, cpus]
 
 
 class Solution:
@@ -167,10 +168,12 @@ class Solution:
             for u in queue:
                 tasks.append(self.sizes[u])
                 orders.append(u)
-            max_makespan, min_makespan, min_job_idx, jobs, cpus = solveNLP(
-                orders, processSpeed, tasks)
+            min_makespan, min_job_idx, jobs, cpus = solveNLP(
+                orders, processSpeed, tasks) #传入start_time列表
 
-            makespan += max_makespan
+            # 每个cpu都有对应的makespan，cpu上当前任务什么时候跑完： cpu_i_makespan，最后取max_i(cpu_i_makespan)
+            # start_time = [] 给定task->cpu分配方案后，所有available任务的开始运行时间，即cpu_i_makespan
+    
 
             # cpus: CPU 分配情况
             # jobs: 每个任务的完成时间
@@ -178,14 +181,14 @@ class Solution:
             # min_job_idx: 第一个完成的任务
             # print(cpus)
             # print(jobs)
-
+        #维护cpu_i_makespan
             cpus_time = collections.defaultdict(list)
+            ## 抢占的话： 仅仅从queue中去除min_job_idx，记录unfinished job。
             for task in orders:
                 print('T{} = {}'.format(task, jobs[task]))
-            # 抢占：queue 移走第一个完成的
-            # 非抢占：
             for _ in range(N):
-                u = queue.popleft()
+                u = queue.popleft() #非抢占的做法
+                # 每次pop的时候维护indegree
                 for v in self.edges[u]:
                     indeg[v] -= 1
                     if indeg[v] == 0:
@@ -194,7 +197,7 @@ class Solution:
 
         processSpeed = [[1] * self.num_tasks for _ in range(processors)]
         tasks = [self.sizes[i + 1] for i in range(self.num_tasks)]
-        max_makespan, min_makespan, min_job_idx, jobs, cpus = solveNLP(
+        min_makespan, min_job_idx, jobs, cpus = solveNLP(
             [i + 1 for i in range(self.num_tasks)], processSpeed, tasks)
         print('Makespan should be', max(jobs.items(), key=lambda a: a[1]))
 
