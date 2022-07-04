@@ -13,7 +13,7 @@ from Processor import Processor
 
 
 softlimit = 5
-hardlimit = 100
+hardlimit = 300
 
 
 def softtime(model, where):
@@ -27,7 +27,7 @@ def softtime(model, where):
             model.terminate()
 
 
-def solveNLP(processSpeed: List[List[int]], taskWorkLoad: List[int]):
+def solveNLP(orders: List[int], processSpeed: List[List[int]], taskWorkLoad: List[int]):
     # @description: 解决NLP问题
     # @param processSpeed: 二维数组，存储处理器运行任务时的速度。处理器 i 运行任务 j 的速度是 processSpeed[i][j] = s[i][j]
     # @param taskWorkLoad: 一维数组，存储任务载荷。任务 j 在处理器 i 上的运行时间是 p[i][j] =  taskWorkLoad[j] / processSpeed[i][j]
@@ -35,8 +35,10 @@ def solveNLP(processSpeed: List[List[int]], taskWorkLoad: List[int]):
     M, N = len(processSpeed), len(taskWorkLoad)
     p = [[taskWorkLoad[j] / processSpeed[i][j] for j in range(N)]
          for i in range(M)]
-
-    model = Model('nonlinear scheduling model')
+    env = Env(empty=True)
+    env.setParam("OutputFlag", 0)
+    env.start()
+    model = Model('nonlinear scheduling model', env=env)
 
     target = model.addVar(lb=-GRB.INFINITY,
                           ub=GRB.INFINITY,
@@ -108,17 +110,23 @@ def solveNLP(processSpeed: List[List[int]], taskWorkLoad: List[int]):
     # print('Optimal Obj: {}'.format(model.ObjVal))
     # print('-----------------------------------------------------------------')
     min_makespan = float("inf")
-    job_idx = 0
+    # max_makespan = 0
+    min_job_idx = 0
     jobs = collections.defaultdict(list)
+    cpus = collections.defaultdict(list)
 
     for j in range(N):
-        print('T{} = {}'.format(j, T[j].x))
-        jobs[j].append(T[j].x)
+        # print('T{} = {}'.format(orders[j], T[j].x))
+        for k in range(M):
+            if x[k][j].x == 1:
+                cpus[k].append(orders[j])
+        jobs[orders[j]].append(T[j].x)
+        # max_makespan = max(T[j].x, max_makespan)
         if T[j].x < min_makespan:
             min_makespan = min(T[j].x, min_makespan)
-            job_idx = j
+            min_job_idx = j
 
-    return [min_makespan, job_idx, jobs]
+    return [min_makespan, min_job_idx, jobs, cpus]
 
 
 class Solution:
@@ -127,56 +135,66 @@ class Solution:
             self.num_tasks, self.num_processors, self.sizes, self.edges = read_dag_adj(
                 file, processors, b, ccr)
 
-        # if verbose:
-            # print("No. of Tasks: ", self.num_tasks)
-            # print("No. of processors: ", self.num_processors)
+        self.tasks = [Task(i) for i in range(self.num_tasks + 2)]
+
+        if verbose:
+            print("No. of Tasks: ", self.num_tasks)
+            print("No. of processors: ", self.num_processors)
 
         indeg = [0] * (self.num_tasks + 2)
 
         for s in self.edges:
             for t in self.edges[s]:
                 indeg[t] += 1
-            # source, dest = int(e.get_source()), int(e.get_destination())
-            # edges[source].append(dest)
-        # self.tasks = [Task(i) for i in range(self.num_tasks)]
-        # self.processors = [Processor(i) for i in range(self.num_processors)]
 
         queue = collections.deque(
             [u for u in range(self.num_tasks) if indeg[u] == 0])
 
-        # result = list()
+        u = queue.popleft()
+        for v in self.edges[u]:
+            indeg[v] -= 1
+            if indeg[v] == 0:
+                queue.append(v)
+
         makespan = 0.0
 
         while queue:
             N = len(queue)
             tasks = []
             orders = []
-            # taskWorkLoad = [0] * N
             processSpeed = [[1] * N for _ in range(processors)]
-            free_processors = processors - N
 
             for u in queue:
                 tasks.append(self.sizes[u])
                 orders.append(u)
-                # for v in self.edges[u]:
-                #     indeg[v] -= 1
-                #     if indeg[v] == 0:
-                #         queue.insert(0, v)
-            min_makespan, job_idx, jobs = solveNLP(processSpeed, tasks)
-            while free_processors >= 0:
-                # TODO: 弹出最早完成的，删除出度，线性规划
-                print()
-            # TODO:
-            # 该层最小完成时间，任务编号
-            print(jobs)
+            min_makespan, min_job_idx, jobs, cpus = solveNLP(
+                orders, processSpeed, tasks)
 
+            # makespan += max_makespan
+
+            # cpus: CPU 分配情况
+            # jobs: 每个任务的完成时间
+            # min_makespan: 第一个完成的任务时间
+            # min_job_idx: 第一个完成的任务
+            # print(cpus)
+            # print(jobs)
+
+            cpus_time = collections.defaultdict(list)
+            for task in orders:
+                print('T{} = {}'.format(task, jobs[task]))
             for _ in range(N):
                 u = queue.popleft()
                 for v in self.edges[u]:
                     indeg[v] -= 1
                     if indeg[v] == 0:
                         queue.append(v)
-        # print(ans)
+        print('Makespan = {}'.format(makespan))
+
+        processSpeed = [[1] * self.num_tasks for _ in range(processors)]
+        tasks = [self.sizes[i + 1] for i in range(self.num_tasks)]
+        min_makespan, min_job_idx, jobs, cpus = solveNLP(
+            [i + 1 for i in range(self.num_tasks)], processSpeed, tasks)
+        print('Makespan should be', max(jobs.items(), key=lambda a: a[1]))
 
 
 if __name__ == "__main__":
@@ -187,4 +205,4 @@ if __name__ == "__main__":
     args = ap.parse_args()
 
     new_sch = Solution(file=args.input, verbose=True,
-                       processors=3, b=0.1, ccr=0.1)
+                       processors=4, b=0.1, ccr=0.1)
