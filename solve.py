@@ -108,15 +108,17 @@ def solveNLP(processSpeed: List[List[int]], taskWorkLoad: List[int]):
     # print('Optimal Obj: {}'.format(model.ObjVal))
     # print('-----------------------------------------------------------------')
     min_makespan = float("inf")
-    job_no = 0
+    job_idx = 0
+    jobs = collections.defaultdict(list)
 
     for j in range(N):
         print('T{} = {}'.format(j, T[j].x))
+        jobs[j].append(T[j].x)
         if T[j].x < min_makespan:
             min_makespan = min(T[j].x, min_makespan)
-            job_no = j
+            job_idx = j
 
-    return [min_makespan, job_no]
+    return [min_makespan, job_idx, jobs]
 
 
 class Solution:
@@ -160,10 +162,13 @@ class Solution:
                 #     indeg[v] -= 1
                 #     if indeg[v] == 0:
                 #         queue.insert(0, v)
-            min_makespan, job_no = solveNLP(processSpeed, tasks)
+            min_makespan, job_idx, jobs = solveNLP(processSpeed, tasks)
+            while free_processors >= 0:
+                # TODO: 弹出最早完成的，删除出度，线性规划
+                print()
             # TODO:
             # 该层最小完成时间，任务编号
-            print(min_makespan, job_no)
+            print(jobs)
 
             for _ in range(N):
                 u = queue.popleft()
