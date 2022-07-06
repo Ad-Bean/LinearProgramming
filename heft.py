@@ -118,12 +118,15 @@ class HEFT:
 
     def __str__(self):
         print_str = ""
+        Utility = 0
         for p in self.processors:
             print_str += 'Processor {}:\n '.format(p.id)
             for t in p.task_list:
                 print_str += 'Task {}: start = {}, end = {}\n'.format(
                     t.id, t.duration['start'], t.duration['end'])
+                Utility -= t.duration['end']
         print_str += "Makespan = {}\n".format(self.makespan)
+        print_str += "Utility = {}\n".format(Utility)
         return print_str
 
 
@@ -135,4 +138,5 @@ if __name__ == "__main__":
                     help="DAG description as a .dot file")
     args = ap.parse_args()
     new_sch = HEFT(file=args.input, verbose=True, p=4, b=0.1, ccr=0.1)
+
     print(new_sch)
