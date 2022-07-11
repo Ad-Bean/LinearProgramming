@@ -1,12 +1,11 @@
 import collections
-import random
 from gurobipy import *
 from typing import List
 from Task import Task
 from read_dag import read_dag_adjacency
 
 softlimit = 5
-hardlimit = 300
+hardlimit = 120
 
 
 def softtime(model, where):
@@ -186,8 +185,8 @@ if __name__ == '__main__':
     num_tasks, workloads, adj_matrix = read_dag_adjacency(args.input)
 
     M, N = 4, num_tasks  # M = 处理器数量；N = 任务数量
-    # processSpeed = [[i + 1] * N for i in range(M)]  # 异构处理器速度
-    processSpeed = [[1] * N for i in range(M)]  # 同构处理器速度
+    processSpeed = [[i + 1] * N for i in range(M)]  # 异构处理器速度
+    # processSpeed = [[1] * N for i in range(M)]  # 同构处理器速度
     presets = [[0] * M for _ in range(N)]
     final_utility = float('-inf')
     final_makespan = float('inf')
@@ -222,10 +221,10 @@ if __name__ == '__main__':
         print('Task {} should be running on CPU {}'.format(
             cur_preset[0] + 1, cur_preset[1] + 1))
         presets[cur_preset[0]][cur_preset[1]] = 1
-        print()
+        # print()
         if i == num_tasks - 1:
             final_utility = cur_utility
             final_makespan = makespan
-
+    print()
     print('Utility = {}'.format(final_utility))
     print('Makespan = {}'.format(final_makespan))
