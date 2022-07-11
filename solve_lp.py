@@ -1,6 +1,5 @@
 import collections
 import random
-
 from gurobipy import *
 from typing import List
 from Task import Task
@@ -21,7 +20,7 @@ def softtime(model, where):
             model.terminate()
 
 
-def solveNLP(processSpeed: List[List[int]], taskWorkLoad: List[int], graph: List[List[int]]):
+def solveNLP(processSpeed: List[List[int]], taskWorkLoad: List[int], graph: List[List[int]], preset: List[List[int]]):
     # @description: 解决NLP问题
     # @param processSpeed: 二维数组，存储处理器运行任务时的速度。处理器 i 运行任务 j 的速度是 processSpeed[i][j] = s[i][j]
     # @param taskWorkLoad: 一维数组，存储任务载荷。任务 j 在处理器 i 上的运行时间是 p[i][j] =  taskWorkLoad[j] / processSpeed[i][j]
@@ -33,7 +32,7 @@ def solveNLP(processSpeed: List[List[int]], taskWorkLoad: List[int], graph: List
 
     # 特判
     if N == 0 or len(graph) != N or len(graph[0]) != N:
-        print('数组taskWorkLoad的长度和graph的两个维度的长度需要相同，均等于任务数量')
+        print('数组 taskWorkLoad 的长度和 graph 的两个维度的长度需要相同，均等于任务数量')
         return None
 
     # 初始化运行时间数组：p[i][j]代表任务 j 在处理器 i 上的运行时间
@@ -62,11 +61,12 @@ def solveNLP(processSpeed: List[List[int]], taskWorkLoad: List[int], graph: List
                       name=f'T{j}')
          for j in range(N)]
     # 1.3.创建任务分配变量数组x：x[i][j]为01变量。x[i][j] == 1代表任务 j 被分配到处理器 i 中
-    x = [[model.addVar(lb=0,
+    x = [[model.addVar(lb=preset[j][i],
                        ub=1,
                        vtype=GRB.BINARY,
                        name=f'x{i}{j}') for j in range(N)]
          for i in range(M)]
+
     # 1.4.辅助变量数组c：c[j][k] == 1 代表任务 j 和任务 k 使用着同一个CPU
     c = [[model.addVar(lb=0,
                        ub=1,
@@ -152,16 +152,12 @@ def solveNLP(processSpeed: List[List[int]], taskWorkLoad: List[int], graph: List
                 T[j] - quicksum(after[j][k] * x[i][j] * p[i][j] for i in range(M)) - after[j][k] * T[k] >= 0, "order_limit")
 
     # ---------- 3.求解 -----------------------------------
+    # model.setParam('TimeLimit', hardlimit)
+    # model.optimize(softtime)
     model.optimize()
 
-    # print the results
-    print('-----------------------------------------------------------------')
-    print('Optimal Obj: {}'.format(model.ObjVal))
-
-    print('-----------------------------------------------------------------')
-    for j in range(N):
-        print('T{} = {}'.format(j + 1, T[j].x))
-        # print('dt{} = {}'.format(j, dt[j].x))
+    # for j in range(N):
+    # print('T{} = {}'.format(j + 1, T[j].x))
 
     cpus = collections.defaultdict(list)
     jobs = [Task(j + 1) for j in range(N)]
@@ -172,35 +168,64 @@ def solveNLP(processSpeed: List[List[int]], taskWorkLoad: List[int], graph: List
             if x[k][j].x == 1:
                 cpus[k].append(jobs[j])
 
-    return [cpus, jobs]
+    return [model.ObjVal, cpus, jobs]
 
 
 if __name__ == '__main__':
+    # python solve_lp.py -i test.dot
+    # -i dag图
     from argparse import ArgumentParser
     ap = ArgumentParser()
     ap.add_argument('-i', '--input', required=True,
                     help="DAG description as a .dot file")
     args = ap.parse_args()
-    num_tasks, sizes, adj_matrix = read_dag_adjacency(args.input)
-    # M = 处理器数量；N = 任务数量
-    M, N = 4, num_tasks
-    # 处理器速度
-    processSpeed = [[1] * N for _ in range(M)]
-    # # 任务载荷
-    # taskWorkLoad = [2]*N
-    # # 邻接图（0->1->2）
-    # graph = [[0, 1, 0],
-    #          [0, 0, 1],
-    #          [0, 0, 0]]
 
-    # print(adj_matrix)
-    # print(sizes)
-    cpus, jobs = solveNLP(processSpeed, sizes, adj_matrix)
+    # num_tasks 任务总数
+    # workloads 任务载荷
+    # adj_matrix 邻接矩阵
+    num_tasks, workloads, adj_matrix = read_dag_adjacency(args.input)
 
-    print()
-    for _, cpu_task in cpus.items():
-        print('cpu {}:'.format(_))
-        for t in cpu_task:
-            print('T{}: {}'.format(t.id, t.duration['end']))
+    M, N = 4, num_tasks  # M = 处理器数量；N = 任务数量
+    # processSpeed = [[i + 1] * N for i in range(M)]  # 异构处理器速度
+    processSpeed = [[1] * N for i in range(M)]  # 同构处理器速度
+    presets = [[0] * M for _ in range(N)]
+    final_utility = float('-inf')
+    final_makespan = float('inf')
+
+    for i in range(num_tasks):
+        cur_adj_matrix = adj_matrix[:i + 1, :i + 1]      # 当前 i 个任务的邻接矩阵
+        cur_utility = float('-inf')                      # 当前 i 个任务的 U 函数
+        cur_preset = []                                  # 任务 i 是否在处理器 j 上
+        makespan = float('inf')                          # 当前 i 个任务的完成时间
+        for j in range(M):
+            presets[i][j] = 1                            # 任务 i 固定在处理器 j
+            cur_sizes = workloads[: i + 1]               # 当前任务载荷
+            utility, cpus, jobs = solveNLP(
+                processSpeed, cur_sizes, cur_adj_matrix, presets)
+            presets[i][j] = 0
+            # print()
+            if utility > cur_utility:
+                cur_utility = utility
+                cur_preset = [i, j]
+            cur_max_makespan = float('-inf')
+            # print('If Task {} runs on CPU {}:'.format(i + 1, j + 1))
+            for _, cpu_task in cpus.items():
+                # print('CPU {}:'.format(_ + 1))
+                for t in cpu_task:
+                    # print('T{}: {}'.format(t.id, t.duration['end']))
+                    cur_max_makespan = max(t.duration['end'], cur_max_makespan)
+                # print()
+            makespan = min(makespan, cur_max_makespan)
+            # print('Makespan = {}'.format(cur_max_makespan))
+            # print('Utility= {}'.format(utility))
+        # print()
+        print('Task {} should be running on CPU {}'.format(
+            cur_preset[0] + 1, cur_preset[1] + 1))
+        presets[cur_preset[0]][cur_preset[1]] = 1
         print()
-        print()
+        if i == num_tasks - 1:
+            final_utility = cur_utility
+            final_makespan = makespan
+
+    print('Utility = {}'.format(final_utility))
+    print('Makespan = {}'.format(final_makespan))
