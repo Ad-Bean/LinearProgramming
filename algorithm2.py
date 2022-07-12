@@ -157,14 +157,14 @@ def solveNLP(processSpeed: List[List[float]], taskWorkLoad: List[float], graph: 
                             "order_limit")
 
     # 2.4.辅助变量(顺序变量)约束
-    before[j][k] = o[j][k] * c[j][k]
-    after[j][k] = (1 - o[j][k]) * c[j][k]
+    # before[j][k] = o[j][k] * c[j][k]
+    # after[j][k] = (1 - o[j][k]) * c[j][k]
     for j in range(N):
         for k in range(N):
             model.addQConstr(before[j][k] == o[j][k] * c[j][k])
             model.addQConstr(after[j][k] == (1 - o[j][k]) * c[j][k])
 
-    # # 2.5.约束条件 (T[k] >= p[k] + T[j]) or (T[j] >= p[j] + T[k]) for independent (j,k) pairs
+    # 2.5.约束条件 (T[k] >= p[k] + T[j]) or (T[j] >= p[j] + T[k]) for independent (j,k) pairs
     for k in range(N):
         for j in range(k):
             model.addQConstr(
@@ -183,7 +183,7 @@ def solveNLP(processSpeed: List[List[float]], taskWorkLoad: List[float], graph: 
     # sub_tasks = get_sub_set([i for i in range(N)])
     # for S in sub_tasks:
     #     model.addConstr(
-    #         (quicksum(pt[j] * T[j] for j in range(N)) >=
+    #         (quicksum(pt[j] * T[j] for j in S) >=
     #          (quicksum(pt[j] for j in S) ** 2 +
     #           quicksum(pt[j] * pt[j] for j in S))
     #          / (2 * M * z)),
