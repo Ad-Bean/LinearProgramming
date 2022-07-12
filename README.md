@@ -4,6 +4,8 @@ DAG generator (./generator):
 
 Constructing new example DAGs requires the [DAGGEN](https://github.com/frs69wq/daggen) github repository.
 
+> Ubuntu 环境
+
 ```bash
 ./daggen -n 20 --fat 0.4 --density 0.2 --regular 0.2 --jump 2 --minalpha 20 --maxalpha 200 --dot -o ../test.dot
 ```
@@ -27,3 +29,7 @@ HEFT:
 ```bash
 python heft.py -i test.dot
 ```
+
+## Reference
+
+[DAG_Scheduling](https://github.com/sharma-n/DAG_Scheduling)

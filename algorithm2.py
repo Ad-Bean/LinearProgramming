@@ -3,6 +3,7 @@ from gurobipy import *
 from typing import List
 from Task import Task
 from read_dag import read_dag_adjacency
+import matplotlib.pyplot as plt
 
 softlimit = 5
 hardlimit = 120
@@ -19,7 +20,16 @@ def softtime(model, where):
             model.terminate()
 
 
-def solveNLP(processSpeed: List[List[int]], taskWorkLoad: List[int], graph: List[List[int]], preset: List[List[int]]):
+def get_sub_set(nums: List[int]):
+    sub_sets = [[]]
+    for x in nums:
+        arr = [item + [x] for item in sub_sets]
+        sub_sets.extend(arr)
+    sub_sets.remove([])
+    return sub_sets
+
+
+def solveNLP(processSpeed: List[List[float]], taskWorkLoad: List[float], graph: List[List[int]], preset: List[List[int]], z: float):
     # @description: 解决NLP问题
     # @param processSpeed: 二维数组，存储处理器运行任务时的速度。处理器 i 运行任务 j 的速度是 processSpeed[i][j] = s[i][j]
     # @param taskWorkLoad: 一维数组，存储任务载荷。任务 j 在处理器 i 上的运行时间是 p[i][j] =  taskWorkLoad[j] / processSpeed[i][j]
@@ -44,10 +54,8 @@ def solveNLP(processSpeed: List[List[int]], taskWorkLoad: List[int], graph: List
     env.setParam("OutputFlag", 0)
     env.start()
     model = Model('nonlinear scheduling model', env=env)
-    # model.Params.MIPGap = 0  # 精度设置
-    # model.Params.IntegralityFocus = 1  # 整数限制
-    # model.Params.BarConvTol = 0  # 容忍度
-    # model.Params.OptimalityTol = 1e-09
+    # model = Model('nonlinear scheduling model')
+
     # 1.1.创建目标函数变量：target = sum(Uj(T[j])) for j in N
     target = model.addVar(lb=-GRB.INFINITY,
                           ub=GRB.INFINITY,
@@ -91,12 +99,19 @@ def solveNLP(processSpeed: List[List[int]], taskWorkLoad: List[int], graph: List
                            name=f'order{j}{k}') for k in range(N)]
              for j in range(N)]
 
+    # 1.8.辅助变量数组 pt[j] 存储 pj
+    pt = [model.addVar(lb=0,
+                       ub=GRB.INFINITY,
+                       vtype=GRB.CONTINUOUS,
+                       name=f'T{j}')
+          for j in range(N)]
+
     # ---------- 2.设置约束 --------------------------------
 
     # 2.0.设置目标函数约束：target = max - sum(k * T[j]) + offset for j in N
     model.setObjective(target, GRB.MAXIMIZE)
     # 添加目标函数约束
-    k, offset = 1, 0
+    k, offset = 1, 10000
     model.addQConstr((target == - quicksum(k * t for t in T) + offset),
                      "target")
 
@@ -135,8 +150,8 @@ def solveNLP(processSpeed: List[List[int]], taskWorkLoad: List[int], graph: List
                             "order_limit")
 
     # 2.4.辅助变量(顺序变量)约束
-    # before[j][k] = o[j][k] * c[j][k]
-    # after[j][k] = (1 - o[j][k]) * c[j][k]
+    before[j][k] = o[j][k] * c[j][k]
+    after[j][k] = (1 - o[j][k]) * c[j][k]
     for j in range(N):
         for k in range(N):
             model.addQConstr(before[j][k] == o[j][k] * c[j][k])
@@ -150,10 +165,27 @@ def solveNLP(processSpeed: List[List[int]], taskWorkLoad: List[int], graph: List
             model.addQConstr(
                 T[j] - quicksum(after[j][k] * x[i][j] * p[i][j] for i in range(M)) - after[j][k] * T[k] >= 0, "order_limit")
 
+    # # # 2.5.松弛
+    # # 2.5.1 辅助约束条件 pt: pt[j] 任务 j 的完成时间
+    # model.addConstrs((pt[j] == quicksum(x[i][j] * p[i][j] for i in range(M))
+    #                  for j in range(N)), "temp_process_time_limit")
+
+    # # 2.5.2 z = max{s[i][j] / s[i'][j']}
+
+    # # 2.5.3  forall S sub N, pS = sum pj for j in S
+    # sub_tasks = get_sub_set([i for i in range(N)])
+    # for S in sub_tasks:
+    #     model.addConstr(
+    #         (quicksum(pt[j] * T[j] for j in range(N)) >=
+    #          (quicksum(pt[j] for j in S) ** 2 +
+    #           quicksum(pt[j] * pt[j] for j in S))
+    #          / (2 * len(S) * z)),
+    #         "relaxed_constrs")
+
     # ---------- 3.求解 -----------------------------------
-    # model.setParam('TimeLimit', hardlimit)
-    # model.optimize(softtime)
-    model.optimize()
+    model.setParam('TimeLimit', hardlimit)
+    model.optimize(softtime)
+    # model.optimize()
 
     # for j in range(N):
     # print('T{} = {}'.format(j + 1, T[j].x))
@@ -170,14 +202,79 @@ def solveNLP(processSpeed: List[List[int]], taskWorkLoad: List[int], graph: List
     return [model.ObjVal, cpus, jobs]
 
 
+def solution():
+    # ./daggen -n 25 --fat 0.4 --density 0.4 --regular 0.2 --jump 2 --minalpha 20 --maxalpha 200 --dot -o ../task25.dot
+    files = ['task20.dot', 'task21.dot', 'task22.dot', 'task23.dot', 'task24.dot', 'task25.dot',
+             'task26.dot', 'task27.dot', 'task28.dot', 'task29.dot', 'task30.dot', 'task40.dot']
+    makespan_dots = []
+    utility_dots = []
+    for filename in files:
+        num_tasks, workloads, adj_matrix = read_dag_adjacency(filename)
+        M, N = 4, num_tasks  # M = 处理器数量；N = 任务数量
+        processSpeed = [[1 + i] * N for i in range(M)]  # 异构处理器速度
+        presets = [[0] * M for _ in range(N)]
+        final_utility = float('-inf')
+        final_makespan = float('inf')
+
+        for i in range(num_tasks):
+            cur_adj_matrix = adj_matrix[: i + 1, : i + 1]      # 当前 i 个任务的邻接矩阵
+            cur_utility = float('-inf')                      # 当前 i 个任务的 U 函数
+            cur_preset = []                                  # 任务 i 是否在处理器 j 上
+            makespan = float('inf')                          # 当前 i 个任务的完成时间
+            for j in range(M):
+                presets[i][j] = 1                            # 任务 i 固定在处理器 j
+                cur_sizes = workloads[: i + 1]               # 当前任务载荷
+                z = M
+                utility, cpus, jobs = solveNLP(
+                    processSpeed, cur_sizes, cur_adj_matrix, presets, z)
+                presets[i][j] = 0
+                # print()
+                if utility > cur_utility:
+                    cur_utility = utility
+                    cur_preset = [i, j]
+                cur_max_makespan = float('-inf')
+                # print('If Task {} runs on CPU {}:'.format(i + 1, j + 1))
+                for _, cpu_task in cpus.items():
+                    # print('CPU {}:'.format(_ + 1))
+                    for t in cpu_task:
+                        # print('T{}: {}'.format(t.id, t.duration['end']))
+                        cur_max_makespan = max(
+                            t.duration['end'], cur_max_makespan)
+                    # print()
+                makespan = min(makespan, cur_max_makespan)
+            # print()
+            # print('Task {} should be running on CPU {}'.format(
+            #     cur_preset[0] + 1, cur_preset[1] + 1))
+            presets[cur_preset[0]][cur_preset[1]] = 1
+            # print()
+            if i == num_tasks - 1:
+                final_utility = cur_utility
+                final_makespan = makespan
+        print('Num of tasks = {}'.format(num_tasks))
+        print('Utility = {}'.format(final_utility))
+        print('Makespan = {}'.format(final_makespan))
+        utility_dots.append(final_utility)
+        makespan_dots.append(final_makespan)
+
+    x = [20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 40]  # 点的横坐标
+
+    plt.plot(x, makespan_dots, 's-', color='r', label="makespan")  # s-:方形
+    plt.plot(x, utility_dots, 'o-', color='g', label="utility")   # o-:圆形
+    plt.xlabel("num of tasks")  # 横坐标名字
+    plt.ylabel("makespan & utility")  # 纵坐标名字
+    plt.legend(loc="best")  # 图例
+    plt.show()
+
+
 if __name__ == '__main__':
     # python solve_lp.py -i test.dot
-    # -i dag图
     from argparse import ArgumentParser
     ap = ArgumentParser()
     ap.add_argument('-i', '--input', required=True,
                     help="DAG description as a .dot file")
     args = ap.parse_args()
+
+    # solution()  # 跑 20、30、40 个任务作图
 
     # num_tasks 任务总数
     # workloads 任务载荷
@@ -185,8 +282,9 @@ if __name__ == '__main__':
     num_tasks, workloads, adj_matrix = read_dag_adjacency(args.input)
 
     M, N = 4, num_tasks  # M = 处理器数量；N = 任务数量
-    processSpeed = [[i + 1] * N for i in range(M)]  # 异构处理器速度
+    processSpeed = [[1 + i] * N for i in range(M)]  # 异构处理器速度
     # processSpeed = [[1] * N for i in range(M)]  # 同构处理器速度
+    z = M
     presets = [[0] * M for _ in range(N)]
     final_utility = float('-inf')
     final_makespan = float('inf')
@@ -200,7 +298,7 @@ if __name__ == '__main__':
             presets[i][j] = 1                            # 任务 i 固定在处理器 j
             cur_sizes = workloads[: i + 1]               # 当前任务载荷
             utility, cpus, jobs = solveNLP(
-                processSpeed, cur_sizes, cur_adj_matrix, presets)
+                processSpeed, cur_sizes, cur_adj_matrix, presets, z)
             presets[i][j] = 0
             # print()
             if utility > cur_utility:
