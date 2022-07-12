@@ -5,6 +5,7 @@ from Task import Task
 from read_dag import read_dag_adjacency
 import matplotlib.pyplot as plt
 
+# 限制 gurobi 求解时间
 softlimit = 5
 hardlimit = 120
 
@@ -21,6 +22,9 @@ def softtime(model, where):
 
 
 def get_sub_set(nums: List[int]):
+    # @description: 获得输入数组的所有非空子集
+    # @nums: 输入数组
+    # @return: nums 的所有非空子集
     sub_sets = [[]]
     for x in nums:
         arr = [item + [x] for item in sub_sets]
@@ -30,7 +34,7 @@ def get_sub_set(nums: List[int]):
 
 
 def solveNLP(processSpeed: List[List[float]], taskWorkLoad: List[float], graph: List[List[int]], preset: List[List[int]], z: float):
-    # @description: 解决NLP问题
+    # @description: 线性规划求解
     # @param processSpeed: 二维数组，存储处理器运行任务时的速度。处理器 i 运行任务 j 的速度是 processSpeed[i][j] = s[i][j]
     # @param taskWorkLoad: 一维数组，存储任务载荷。任务 j 在处理器 i 上的运行时间是 p[i][j] =  taskWorkLoad[j] / processSpeed[i][j]
     # @param graph:二维数组，graph[j][k] == 1 代表任务 j -> k 存在一条有向边（ j ， k 邻接，且 j 需要在 k 之前执行）
@@ -67,12 +71,14 @@ def solveNLP(processSpeed: List[List[float]], taskWorkLoad: List[float], graph: 
                       vtype=GRB.CONTINUOUS,
                       name=f'T{j}')
          for j in range(N)]
-    # 1.3.创建任务分配变量数组x：x[i][j]为01变量。x[i][j] == 1代表任务 j 被分配到处理器 i 中
-    x = [[model.addVar(lb=preset[j][i],
-                       ub=1,
-                       vtype=GRB.BINARY,
-                       name=f'x{i}{j}') for j in range(N)]
-         for i in range(M)]
+
+    # # 使用 preset 替代 x
+    # # 1.3.创建任务分配变量数组x：x[i][j]为 01 变量。x[i][j] == 1代表任务 j 被分配到处理器 i 中
+    # x = [[model.addVar(lb=preset[j][i],
+    #                    ub=1,
+    #                    vtype=GRB.BINARY,
+    #                    name=f'x{i}{j}') for j in range(N)]
+    #      for i in range(M)]
 
     # 1.4.辅助变量数组c：c[j][k] == 1 代表任务 j 和任务 k 使用着同一个CPU
     c = [[model.addVar(lb=0,
@@ -86,6 +92,7 @@ def solveNLP(processSpeed: List[List[float]], taskWorkLoad: List[float], graph: 
                        vtype=GRB.BINARY,
                        name=f'o{j}{k}') for k in range(N)]
          for j in range(N)]
+
     # 1.6.辅助变量数组before：before[j][k] == 1 代表任务 j 在任务 k 同CPU，且 j 在 k 之前
     before = [[model.addVar(lb=0,
                             ub=1,
@@ -112,7 +119,7 @@ def solveNLP(processSpeed: List[List[float]], taskWorkLoad: List[float], graph: 
     model.setObjective(target, GRB.MAXIMIZE)
     # 添加目标函数约束
     k, offset = 1, 10000
-    model.addQConstr((target == - quicksum(k * t for t in T) + offset),
+    model.addQConstr((target == -quicksum(k * t for t in T) + offset),
                      "target")
 
     # # 设置目标函数约束：target = max sum(1 / T[j]) for j in N
@@ -130,23 +137,23 @@ def solveNLP(processSpeed: List[List[float]], taskWorkLoad: List[float], graph: 
     #                  "target")
 
     # 2.1.约束条件 sum(x[i][j]) == 1 for j in N
-    model.addConstrs(((quicksum(x[i][j] for i in range(M)) == 1) for j in range(N)),
+    model.addConstrs(((quicksum(preset[i][j] for i in range(M)) == 1) for j in range(N)),
                      "cpu_allocate")
 
     # 2.2.约束条件 T[j] >= p[j] for j in N
-    model.addConstrs((T[j] >= quicksum(x[i][j] * p[i][j] for i in range(M)) for j in range(N)),
+    model.addConstrs((T[j] >= quicksum(preset[i][j] * p[i][j] for i in range(M)) for j in range(N)),
                      "process_time_limit")
 
-    # 2.3.辅助变量c(同CPU标志位)约束 c[j][k] = sum(x[i][j] * x[i][k]) for i in M
+    # 2.3.辅助变量c(同CPU标志位)约束 c[j][k] = sum(preset[i][j] * preset[i][k]) for i in M
     for j in range(N):
         for k in range(N):
             model.addQConstr(c[j][k] == quicksum(
-                x[i][j] * x[i][k] for i in range(M)))
+                preset[i][j] * preset[i][k] for i in range(M)))
 
     # 2.4.约束条件 T[k] >= p[k] + T[j] for j before k
     for k in range(N):
         for j in range(N):
-            model.addConstr((T[k] - graph[j][k] * quicksum(x[i][k] * p[i][k] for i in range(M)) - graph[j][k] * T[j] >= 0),
+            model.addConstr((T[k] - graph[j][k] * quicksum(preset[i][k] * p[i][k] for i in range(M)) - graph[j][k] * T[j] >= 0),
                             "order_limit")
 
     # 2.4.辅助变量(顺序变量)约束
@@ -157,17 +164,17 @@ def solveNLP(processSpeed: List[List[float]], taskWorkLoad: List[float], graph: 
             model.addQConstr(before[j][k] == o[j][k] * c[j][k])
             model.addQConstr(after[j][k] == (1 - o[j][k]) * c[j][k])
 
-    # 2.5.约束条件 (T[k] >= p[k] + T[j]) or (T[j] >= p[j] + T[k]) for independent (j,k) pairs
+    # # 2.5.约束条件 (T[k] >= p[k] + T[j]) or (T[j] >= p[j] + T[k]) for independent (j,k) pairs
     for k in range(N):
         for j in range(k):
             model.addQConstr(
-                T[k] - quicksum(before[j][k] * x[i][k] * p[i][k] for i in range(M)) - before[j][k] * T[j] >= 0, "order_limit")
+                T[k] - quicksum(before[j][k] * preset[i][k] * p[i][k] for i in range(M)) - before[j][k] * T[j] >= 0, "order_limit")
             model.addQConstr(
-                T[j] - quicksum(after[j][k] * x[i][j] * p[i][j] for i in range(M)) - after[j][k] * T[k] >= 0, "order_limit")
+                T[j] - quicksum(after[j][k] * preset[i][j] * p[i][j] for i in range(M)) - after[j][k] * T[k] >= 0, "order_limit")
 
-    # # # 2.5.松弛
+    # # 2.5.松弛约束
     # # 2.5.1 辅助约束条件 pt: pt[j] 任务 j 的完成时间
-    # model.addConstrs((pt[j] == quicksum(x[i][j] * p[i][j] for i in range(M))
+    # model.addConstrs((pt[j] == quicksum(preset[i][j] * p[i][j] for i in range(M))
     #                  for j in range(N)), "temp_process_time_limit")
 
     # # 2.5.2 z = max{s[i][j] / s[i'][j']}
@@ -179,16 +186,15 @@ def solveNLP(processSpeed: List[List[float]], taskWorkLoad: List[float], graph: 
     #         (quicksum(pt[j] * T[j] for j in range(N)) >=
     #          (quicksum(pt[j] for j in S) ** 2 +
     #           quicksum(pt[j] * pt[j] for j in S))
-    #          / (2 * len(S) * z)),
+    #          / (2 * M * z)),
     #         "relaxed_constrs")
 
     # ---------- 3.求解 -----------------------------------
+    # 限制时间
     model.setParam('TimeLimit', hardlimit)
     model.optimize(softtime)
+    # # 不限制时间
     # model.optimize()
-
-    # for j in range(N):
-    # print('T{} = {}'.format(j + 1, T[j].x))
 
     cpus = collections.defaultdict(list)
     jobs = [Task(j + 1) for j in range(N)]
@@ -196,7 +202,7 @@ def solveNLP(processSpeed: List[List[float]], taskWorkLoad: List[float], graph: 
     for j in range(N):
         jobs[j].duration['end'] = T[j].x
         for k in range(M):
-            if x[k][j].x == 1:
+            if preset[k][j] == 1:
                 cpus[k].append(jobs[j])
 
     return [model.ObjVal, cpus, jobs]
@@ -274,7 +280,8 @@ if __name__ == '__main__':
                     help="DAG description as a .dot file")
     args = ap.parse_args()
 
-    # solution()  # 跑 20、30、40 个任务作图
+    # 跑 20、30、40 个任务并且作图
+    # solution()
 
     # num_tasks 任务总数
     # workloads 任务载荷
@@ -284,8 +291,11 @@ if __name__ == '__main__':
     M, N = 4, num_tasks  # M = 处理器数量；N = 任务数量
     processSpeed = [[1 + i] * N for i in range(M)]  # 异构处理器速度
     # processSpeed = [[1] * N for i in range(M)]  # 同构处理器速度
+
+    # z = max{s[i][j] / s[i'][j']}
     z = M
-    presets = [[0] * M for _ in range(N)]
+
+    presets = [[0] * N for _ in range(M)]
     final_utility = float('-inf')
     final_makespan = float('inf')
 
@@ -295,11 +305,11 @@ if __name__ == '__main__':
         cur_preset = []                                  # 任务 i 是否在处理器 j 上
         makespan = float('inf')                          # 当前 i 个任务的完成时间
         for j in range(M):
-            presets[i][j] = 1                            # 任务 i 固定在处理器 j
+            presets[j][i] = 1                            # 任务 i 固定在处理器 j
             cur_sizes = workloads[: i + 1]               # 当前任务载荷
             utility, cpus, jobs = solveNLP(
                 processSpeed, cur_sizes, cur_adj_matrix, presets, z)
-            presets[i][j] = 0
+            presets[j][i] = 0
             # print()
             if utility > cur_utility:
                 cur_utility = utility
@@ -318,7 +328,7 @@ if __name__ == '__main__':
         # print()
         print('Task {} should be running on CPU {}'.format(
             cur_preset[0] + 1, cur_preset[1] + 1))
-        presets[cur_preset[0]][cur_preset[1]] = 1
+        presets[cur_preset[1]][cur_preset[0]] = 1
         # print()
         if i == num_tasks - 1:
             final_utility = cur_utility
