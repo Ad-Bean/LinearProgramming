@@ -2,6 +2,7 @@ import collections
 from gurobipy import *
 from typing import List
 from Task import Task
+from heft import HEFT
 from read_dag import read_dag_adjacency
 import matplotlib.pyplot as plt
 
@@ -106,12 +107,12 @@ def solveNLP(processSpeed: List[List[float]], taskWorkLoad: List[float], graph: 
                            name=f'order{j}{k}') for k in range(N)]
              for j in range(N)]
 
-    # 1.8.辅助变量数组 pt[j] 存储 pj
-    pt = [model.addVar(lb=0,
-                       ub=GRB.INFINITY,
-                       vtype=GRB.CONTINUOUS,
-                       name=f'T{j}')
-          for j in range(N)]
+    # # 1.8.辅助变量数组 pt[j] 存储 pj
+    # pt = [model.addVar(lb=0,
+    #                    ub=GRB.INFINITY,
+    #                    vtype=GRB.CONTINUOUS,
+    #                    name=f'T{j}')
+    #       for j in range(N)]
 
     # ---------- 2.设置约束 --------------------------------
 
@@ -172,10 +173,12 @@ def solveNLP(processSpeed: List[List[float]], taskWorkLoad: List[float], graph: 
             model.addQConstr(
                 T[j] - quicksum(after[j][k] * preset[i][j] * p[i][j] for i in range(M)) - after[j][k] * T[k] >= 0, "order_limit")
 
-    # # 2.5.松弛约束
+    # 2.5.松弛约束
     # # 2.5.1 辅助约束条件 pt: pt[j] 任务 j 的完成时间
     # model.addConstrs((pt[j] == quicksum(preset[i][j] * p[i][j] for i in range(M))
     #                  for j in range(N)), "temp_process_time_limit")
+
+    # pt = [preset[i][j] * p[i][j] for i in range(M) for j in range(N)]
 
     # # 2.5.2 z = max{s[i][j] / s[i'][j']}
 
@@ -183,16 +186,17 @@ def solveNLP(processSpeed: List[List[float]], taskWorkLoad: List[float], graph: 
     # sub_tasks = get_sub_set([i for i in range(N)])
     # for S in sub_tasks:
     #     model.addConstr(
-    #         (quicksum(pt[j] * T[j] for j in S) >=
+    #         (quicksum(pt[j] * T[j] for j in S) -
     #          (quicksum(pt[j] for j in S) ** 2 +
     #           quicksum(pt[j] * pt[j] for j in S))
-    #          / (2 * M * z)),
+    #          / (2 * M * z)) >= 0,
     #         "relaxed_constrs")
 
     # ---------- 3.求解 -----------------------------------
     # 限制时间
     model.setParam('TimeLimit', hardlimit)
     model.optimize(softtime)
+
     # # 不限制时间
     # model.optimize()
 
@@ -214,26 +218,41 @@ def solution():
              'task26.dot', 'task27.dot', 'task28.dot', 'task29.dot', 'task30.dot', 'task40.dot']
     makespan_dots = []
     utility_dots = []
+    heft_makespan_dots = []
+    heft_utility_dots = []
     for filename in files:
+        # print('Makespan: {}'.format(makespan))
+        # print('Utility: {}'.format(utility))
+        # print('Num of tasks = {}'.format(num_tasks))
+        # print('Makespan = {}'.format(final_makespan))
+        # print('Utility = {}'.format(final_utility))
+
+        new_sch = HEFT(file=filename, verbose=False, p=4, b=0.1, ccr=0.1)
+        heft_makespan_dots.append(new_sch.getMakespan())
+        heft_utility_dots.append(new_sch.getUtility())
+
+        # utility_dots.append(final_utility)
+        # makespan_dots.append(final_makespan)
+
         num_tasks, workloads, adj_matrix = read_dag_adjacency(filename)
-        M, N = 4, num_tasks  # M = 处理器数量；N = 任务数量
+        # M = 处理器数量；N = 任务数量
+        M, N = 4, num_tasks
         processSpeed = [[1 + i] * N for i in range(M)]  # 异构处理器速度
-        presets = [[0] * M for _ in range(N)]
+        presets = [[0] * N for _ in range(M)]
         final_utility = float('-inf')
         final_makespan = float('inf')
 
-        for i in range(num_tasks):
-            cur_adj_matrix = adj_matrix[: i + 1, : i + 1]      # 当前 i 个任务的邻接矩阵
-            cur_utility = float('-inf')                      # 当前 i 个任务的 U 函数
-            cur_preset = []                                  # 任务 i 是否在处理器 j 上
-            makespan = float('inf')                          # 当前 i 个任务的完成时间
+        for i in range(N):
+            cur_adj_matrix = adj_matrix[: i + 1, : i + 1]     # 当前 i 个任务的邻接矩阵
+            cur_utility = float('-inf')                       # 当前 i 个任务的 U 函数
+            makespan = float('inf')                           # 当前 i 个任务的完成时间
+            cur_preset = []                                   # 任务 i 是否在处理器 j 上
             for j in range(M):
-                presets[i][j] = 1                            # 任务 i 固定在处理器 j
-                cur_sizes = workloads[: i + 1]               # 当前任务载荷
-                z = M
+                presets[j][i] = 1                             # 任务 i 固定在处理器 j
+                cur_sizes = workloads[: i + 1]                # 当前任务载荷
                 utility, cpus, jobs = solveNLP(
-                    processSpeed, cur_sizes, cur_adj_matrix, presets, z)
-                presets[i][j] = 0
+                    processSpeed, cur_sizes, cur_adj_matrix, presets, M)
+                presets[j][i] = 0
                 # print()
                 if utility > cur_utility:
                     cur_utility = utility
@@ -249,9 +268,7 @@ def solution():
                     # print()
                 makespan = min(makespan, cur_max_makespan)
             # print()
-            # print('Task {} should be running on CPU {}'.format(
-            #     cur_preset[0] + 1, cur_preset[1] + 1))
-            presets[cur_preset[0]][cur_preset[1]] = 1
+            presets[cur_preset[1]][cur_preset[0]] = 1
             # print()
             if i == num_tasks - 1:
                 final_utility = cur_utility
@@ -264,8 +281,12 @@ def solution():
 
     x = [20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 40]  # 点的横坐标
 
-    plt.plot(x, makespan_dots, 's-', color='r', label="makespan")  # s-:方形
+    plt.plot(x, makespan_dots, 'o-', color='r', label="makespan")  # s-:方形
     plt.plot(x, utility_dots, 'o-', color='g', label="utility")   # o-:圆形
+    plt.plot(x, heft_makespan_dots, '--',
+             color='r', label="heft_makespan")   # o-:圆形
+    plt.plot(x, heft_utility_dots, '--', color='g',
+             label="heft_utility")   # o-:圆形
     plt.xlabel("num of tasks")  # 横坐标名字
     plt.ylabel("makespan & utility")  # 纵坐标名字
     plt.legend(loc="best")  # 图例
@@ -280,59 +301,59 @@ if __name__ == '__main__':
                     help="DAG description as a .dot file")
     args = ap.parse_args()
 
-    # 跑 20、30、40 个任务并且作图
-    # solution()
+    # 跑 20、30、40 个任务并且作图对比 heft 和 algo2
+    solution()
 
-    # num_tasks 任务总数
-    # workloads 任务载荷
-    # adj_matrix 邻接矩阵
-    num_tasks, workloads, adj_matrix = read_dag_adjacency(args.input)
+    # # num_tasks 任务总数
+    # # workloads 任务载荷
+    # # adj_matrix 邻接矩阵
+    # num_tasks, workloads, adj_matrix = read_dag_adjacency(args.input)
 
-    M, N = 4, num_tasks  # M = 处理器数量；N = 任务数量
-    processSpeed = [[1 + i] * N for i in range(M)]  # 异构处理器速度
-    # processSpeed = [[1] * N for i in range(M)]  # 同构处理器速度
+    # M, N = 4, num_tasks  # M = 处理器数量；N = 任务数量
+    # processSpeed = [[1 + i] * N for i in range(M)]  # 异构处理器速度
+    # # processSpeed = [[1] * N for i in range(M)]  # 同构处理器速度
 
-    # z = max{s[i][j] / s[i'][j']}
-    z = M
+    # # z = max{s[i][j] / s[i'][j']}
+    # z = M
 
-    presets = [[0] * N for _ in range(M)]
-    final_utility = float('-inf')
-    final_makespan = float('inf')
+    # presets = [[0] * N for _ in range(M)]
+    # final_utility = float('-inf')
+    # final_makespan = float('inf')
 
-    for i in range(num_tasks):
-        cur_adj_matrix = adj_matrix[:i + 1, :i + 1]      # 当前 i 个任务的邻接矩阵
-        cur_utility = float('-inf')                      # 当前 i 个任务的 U 函数
-        cur_preset = []                                  # 任务 i 是否在处理器 j 上
-        makespan = float('inf')                          # 当前 i 个任务的完成时间
-        for j in range(M):
-            presets[j][i] = 1                            # 任务 i 固定在处理器 j
-            cur_sizes = workloads[: i + 1]               # 当前任务载荷
-            utility, cpus, jobs = solveNLP(
-                processSpeed, cur_sizes, cur_adj_matrix, presets, z)
-            presets[j][i] = 0
-            # print()
-            if utility > cur_utility:
-                cur_utility = utility
-                cur_preset = [i, j]
-            cur_max_makespan = float('-inf')
-            # print('If Task {} runs on CPU {}:'.format(i + 1, j + 1))
-            for _, cpu_task in cpus.items():
-                # print('CPU {}:'.format(_ + 1))
-                for t in cpu_task:
-                    # print('T{}: {}'.format(t.id, t.duration['end']))
-                    cur_max_makespan = max(t.duration['end'], cur_max_makespan)
-                # print()
-            makespan = min(makespan, cur_max_makespan)
-            # print('Makespan = {}'.format(cur_max_makespan))
-            # print('Utility= {}'.format(utility))
-        # print()
-        print('Task {} should be running on CPU {}'.format(
-            cur_preset[0] + 1, cur_preset[1] + 1))
-        presets[cur_preset[1]][cur_preset[0]] = 1
-        # print()
-        if i == num_tasks - 1:
-            final_utility = cur_utility
-            final_makespan = makespan
-    print()
-    print('Utility = {}'.format(final_utility))
-    print('Makespan = {}'.format(final_makespan))
+    # for i in range(num_tasks):
+    #     cur_adj_matrix = adj_matrix[:i + 1, :i + 1]      # 当前 i 个任务的邻接矩阵
+    #     cur_utility = float('-inf')                      # 当前 i 个任务的 U 函数
+    #     cur_preset = []                                  # 任务 i 是否在处理器 j 上
+    #     makespan = float('inf')                          # 当前 i 个任务的完成时间
+    #     for j in range(M):
+    #         presets[j][i] = 1                            # 任务 i 固定在处理器 j
+    #         cur_sizes = workloads[: i + 1]               # 当前任务载荷
+    #         utility, cpus, jobs = solveNLP(
+    #             processSpeed, cur_sizes, cur_adj_matrix, presets, z)
+    #         presets[j][i] = 0
+    #         # print()
+    #         if utility > cur_utility:
+    #             cur_utility = utility
+    #             cur_preset = [i, j]
+    #         cur_max_makespan = float('-inf')
+    #         # print('If Task {} runs on CPU {}:'.format(i + 1, j + 1))
+    #         for _, cpu_task in cpus.items():
+    #             # print('CPU {}:'.format(_ + 1))
+    #             for t in cpu_task:
+    #                 # print('T{}: {}'.format(t.id, t.duration['end']))
+    #                 cur_max_makespan = max(t.duration['end'], cur_max_makespan)
+    #             # print()
+    #         makespan = min(makespan, cur_max_makespan)
+    #         # print('Makespan = {}'.format(cur_max_makespan))
+    #         # print('Utility= {}'.format(utility))
+    #     # print()
+    #     print('Task {} should be running on CPU {}'.format(
+    #         cur_preset[0] + 1, cur_preset[1] + 1))
+    #     presets[cur_preset[1]][cur_preset[0]] = 1
+    #     # print()
+    #     if i == num_tasks - 1:
+    #         final_utility = cur_utility
+    #         final_makespan = makespan
+    # print()
+    # print('Utility = {}'.format(final_utility))
+    # print('Makespan = {}'.format(final_makespan))
